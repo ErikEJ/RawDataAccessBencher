@@ -15,12 +15,13 @@ namespace RawBencher.Benchers
 	public class EntityFrameworkCoreNormalBencher : BencherBase<EFCore.Bencher.EntityClasses.SalesOrderHeader, EFCore.Bencher.EntityClasses.CreditCard>
 	{
 		private readonly PooledDbContextFactory<AWDataContext> pooledDbContextFactory;
+		private readonly PooledDbContextFactory<AWDataContext> pooledInsertDbContextFactory;
 		private readonly string connectionString;
 
 		/// <summary>
 		/// Initializes a new instance of the <see cref="EntityFrameworkCoreNormalBencher"/> class.
 		/// </summary>
-		public EntityFrameworkCoreNormalBencher(string connectionString)
+		public EntityFrameworkCoreNormalBencher(string connectionString, int batchSize)
 			: base(e => e.SalesOrderId, l=>l.CreditCardId, usesChangeTracking: true, usesCaching: false, supportsEagerLoading:true, supportsAsync:true, supportsInserts:true)
 		{
 			this.connectionString = connectionString;
@@ -30,6 +31,15 @@ namespace RawBencher.Benchers
 				.Options;
 
 			pooledDbContextFactory = new PooledDbContextFactory<AWDataContext>(options);
+
+			var insertOptions = new DbContextOptionsBuilder<AWDataContext>()
+				.UseSqlServer(connectionString, b =>
+				{
+					b.MaxBatchSize(batchSize);
+				})
+				.Options;
+
+			pooledInsertDbContextFactory = new PooledDbContextFactory<AWDataContext>(insertOptions);
 		}
 
 
@@ -182,14 +192,7 @@ namespace RawBencher.Benchers
 
 		public override void InsertSet(IEnumerable<CreditCard> toInsert, int batchSize)
 		{
-			var options = new DbContextOptionsBuilder<AWDataContext>()
-				.UseSqlServer(connectionString, b =>
-				{
-					b.MaxBatchSize(batchSize);
-				})
-				.Options;
-
-			using (var ctx = new AWDataContext(options))
+			using (var ctx = pooledInsertDbContextFactory.CreateDbContext())
 			{
 				ctx.CreditCards.AddRange(toInsert);
 				ctx.SaveChanges();
